@@ -3,7 +3,23 @@ import sys
 import time
 import torch
 import torch.nn as nn
-from torch.cuda.amp import GradScaler, autocast
+import contextlib
+
+@contextlib.contextmanager
+def noop_context():
+    yield None
+
+class NoopScaler:
+    def scale(self, loss):
+        return loss
+    def step(self, optimizer):
+        optimizer.step()
+    def update(self):
+        pass
+    def get_scale(self):
+        return 1.0
+    def set_scale(self, scale):
+        pass
 
 from data_loader import create_dataloaders
 
@@ -23,7 +39,7 @@ def train_epoch(model, loader, optimizer, criterion, device, scaler, model_name,
         coords = coords.to(device)
 
         optimizer.zero_grad()
-        with autocast():
+        with noop_context():
             if model_name in GEO_MODELS:
                 if model_name == "17_MultiTask-Geo":
                     country_logits, coord_pred = model(images, coords)
@@ -57,7 +73,7 @@ def evaluate(model, loader, criterion, device, model_name):
         images, labels = images.to(device), labels.to(device)
         coords = coords.to(device)
 
-        with autocast():
+        with noop_context():
             if model_name in GEO_MODELS:
                 if model_name == "17_MultiTask-Geo":
                     country_logits, _ = model(images, coords)
@@ -92,7 +108,7 @@ def train_and_eval(model_name, build_fn, data_root, device, epochs=50, batch_siz
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
-    scaler = GradScaler()
+    scaler = NoopScaler()  # Disable AMP — causes hangs with residual models
 
     best_valid_acc = 0.0
     best_state = None
