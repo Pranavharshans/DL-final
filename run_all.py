@@ -63,7 +63,7 @@ def main():
         log(f"# MODEL {rank}/{NUM_MODELS}: {name}")
         log(f"{'#'*60}")
 
-        result = train_and_eval(name, build_fn, DATA_ROOT, device, epochs=50, batch_size=128, image_size=256)
+        result = train_and_eval(name, build_fn, DATA_ROOT, device, epochs=50, batch_size=64, image_size=256)
         results.append(result)
         append_result(result, rank)
         git_push()
