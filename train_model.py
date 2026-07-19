@@ -111,8 +111,7 @@ def train_and_eval(model_name, build_fn, data_root, device, epochs=50, batch_siz
             best_valid_acc = valid_acc
             best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
 
-        if (epoch + 1) % 5 == 0 or epoch == 0:
-            print(f"  Epoch {epoch+1:3d} | train_loss: {train_loss:.4f} train_acc: {train_acc:.4f} | valid_loss: {valid_loss:.4f} valid_acc: {valid_acc:.4f}", flush=True)
+        print(f"  Epoch {epoch+1:3d} | train_loss: {train_loss:.4f} train_acc: {train_acc:.4f} | valid_loss: {valid_loss:.4f} valid_acc: {valid_acc:.4f}", flush=True)
 
     train_time = time.time() - t0
     print(f"Training time: {train_time:.1f}s ({train_time/60:.1f}m)", flush=True)
