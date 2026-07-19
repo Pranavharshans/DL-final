@@ -76,13 +76,13 @@ def evaluate(model, loader, criterion, device, model_name):
     return total_loss / n, total_acc / n
 
 
-def train_and_eval(model_name, build_fn, data_root, device, epochs=50, batch_size=32, lr=0.001):
+def train_and_eval(model_name, build_fn, data_root, device, epochs=50, batch_size=32, lr=0.001, image_size=256):
     print(f"\n{'='*60}", flush=True)
     print(f"Training: {model_name}", flush=True)
     print(f"{'='*60}", flush=True)
 
     train_loader, valid_loader, test_loader, countries, _ = create_dataloaders(
-        data_root, image_size=512, batch_size=batch_size, num_workers=4
+        data_root, image_size=image_size, batch_size=batch_size, num_workers=2
     )
 
     model = build_fn().to(device)
