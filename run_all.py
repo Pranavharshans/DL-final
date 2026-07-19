@@ -45,33 +45,37 @@ def git_push():
     subprocess.run(["git", "-C", DATA_ROOT, "push"], check=False)
 
 
+def log(msg):
+    print(msg, flush=True)
+
+
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Device: {device}")
-    print(f"Models to run: {len(MODEL_REGISTRY)}")
-    print(f"Data root: {DATA_ROOT}")
+    log(f"Device: {device}")
+    log(f"Models to run: {len(MODEL_REGISTRY)}")
+    log(f"Data root: {DATA_ROOT}")
 
     init_results_file()
     results = []
 
     for rank, (name, build_fn) in enumerate(MODEL_REGISTRY.items(), 1):
-        print(f"\n{'#'*60}")
-        print(f"# MODEL {rank}/{NUM_MODELS}: {name}")
-        print(f"{'#'*60}")
+        log(f"\n{'#'*60}")
+        log(f"# MODEL {rank}/{NUM_MODELS}: {name}")
+        log(f"{'#'*60}")
 
         result = train_and_eval(name, build_fn, DATA_ROOT, device, epochs=50, batch_size=32)
         results.append(result)
         append_result(result, rank)
         git_push()
-        print(f"Pushed results for {name}")
+        log(f"Pushed results for {name}")
 
     # Print final ranking
     results.sort(key=lambda r: r["test_acc"], reverse=True)
-    print(f"\n{'='*60}")
-    print("FINAL RANKING (by Test Accuracy)")
-    print(f"{'='*60}")
+    log(f"\n{'='*60}")
+    log("FINAL RANKING (by Test Accuracy)")
+    log(f"{'='*60}")
     for i, r in enumerate(results, 1):
-        print(f"  {i:2d}. {r['model']:30s} Test: {r['test_acc']:.4f}  Valid: {r['valid_acc']:.4f}  Train: {r['train_acc']:.4f}  ({r['params']:,} params, {r['time_sec']:.0f}s)")
+        log(f"  {i:2d}. {r['model']:30s} Test: {r['test_acc']:.4f}  Valid: {r['valid_acc']:.4f}  Train: {r['train_acc']:.4f}  ({r['params']:,} params, {r['time_sec']:.0f}s)")
 
 
 if __name__ == "__main__":
