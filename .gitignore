@@ -1,0 +1,31 @@
+# Dataset images (large files)
+train/*.jpg
+valid/*.jpg
+test/*.jpg
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Output CSVs (root level)
+/*.csv
+# Output model files
+/*.pt
+figures/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# PDF
+*.pdf
+
+# Temp
+*.tmp/

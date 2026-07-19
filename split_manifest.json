@@ -1,0 +1,20 @@
+{
+  "source": "/Users/pranavharshans/All-proj/DL-final/HAI_DL_Group_Assignment/geo_dataset",
+  "seed": 42,
+  "ratios": {
+    "train": 0.7,
+    "valid": 0.2,
+    "test": 0.1
+  },
+  "counts": {
+    "train": 7560,
+    "valid": 2160,
+    "test": 1080
+  },
+  "countries": 18,
+  "samples_per_country": {
+    "train": 420,
+    "valid": 120,
+    "test": 60
+  }
+}
