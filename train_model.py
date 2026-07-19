@@ -53,13 +53,18 @@ def train_epoch(model, loader, optimizer, criterion, device, scaler, model_name,
 
 
 @torch.no_grad()
-def evaluate(model, loader, criterion, device, model_name):
+def evaluate(model, loader, criterion, device, model_name, neutral_coords=None):
     model.eval()
     total_loss, total_acc, n = 0.0, 0.0, 0
     for batch in loader:
         images, labels, coords = batch
         images, labels = images.to(device), labels.to(device)
-        coords = coords.to(device)
+        # For geo models during eval: replace real coords with neutral mean
+        # so the model can't cheat using lat/lng. Training still gets real coords.
+        if neutral_coords is not None and model_name in GEO_MODELS:
+            coords = neutral_coords.expand(images.size(0), -1).to(device)
+        else:
+            coords = coords.to(device)
 
         with autocast():
             if model_name in GEO_MODELS:
@@ -89,6 +94,19 @@ def train_and_eval(model_name, build_fn, data_root, device, epochs=50, batch_siz
         data_root, image_size=image_size, batch_size=batch_size, num_workers=4
     )
 
+    # Compute training set mean lat/lng for neutral geo eval
+    neutral_coords = None
+    if model_name in GEO_MODELS:
+        all_lats, all_lngs = [], []
+        for batch in train_loader:
+            _, _, coords = batch
+            all_lats.append(coords[:, 0].mean().item())
+            all_lngs.append(coords[:, 1].mean().item())
+        mean_lat = sum(all_lats) / len(all_lats)
+        mean_lng = sum(all_lngs) / len(all_lngs)
+        neutral_coords = torch.tensor([mean_lat, mean_lng], dtype=torch.float32).to(device)
+        print(f"Neutral eval coords: ({mean_lat:.2f}, {mean_lng:.2f})", flush=True)
+
     model = build_fn().to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Parameters: {n_params:,}", flush=True)
@@ -104,7 +122,7 @@ def train_and_eval(model_name, build_fn, data_root, device, epochs=50, batch_siz
     t0 = time.time()
     for epoch in range(epochs):
         train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device, scaler, model_name, epoch + 1)
-        valid_loss, valid_acc = evaluate(model, valid_loader, criterion, device, model_name)
+        valid_loss, valid_acc = evaluate(model, valid_loader, criterion, device, model_name, neutral_coords)
         scheduler.step()
 
         if valid_acc > best_valid_acc:
@@ -118,9 +136,9 @@ def train_and_eval(model_name, build_fn, data_root, device, epochs=50, batch_siz
     print(f"Training time: {train_time:.1f}s ({train_time/60:.1f}m)", flush=True)
 
     model.load_state_dict(best_state)
-    _, train_acc = evaluate(model, train_loader, criterion, device, model_name)
-    _, valid_acc = evaluate(model, valid_loader, criterion, device, model_name)
-    _, test_acc = evaluate(model, test_loader, criterion, device, model_name)
+    _, train_acc = evaluate(model, train_loader, criterion, device, model_name, neutral_coords)
+    _, valid_acc = evaluate(model, valid_loader, criterion, device, model_name, neutral_coords)
+    _, test_acc = evaluate(model, test_loader, criterion, device, model_name, neutral_coords)
 
     print(f"Final — Train: {train_acc:.4f} | Valid: {valid_acc:.4f} | Test: {test_acc:.4f}", flush=True)
     print(f"Best Valid: {best_valid_acc:.4f}", flush=True)
