@@ -1,25 +1,8 @@
-"""Train one model, evaluate on train/valid/test, return metrics. Shared for all 20."""
-import sys
+"""Train one model — exact config that worked for models 1-3."""
 import time
 import torch
 import torch.nn as nn
-import contextlib
-
-@contextlib.contextmanager
-def noop_context():
-    yield None
-
-class NoopScaler:
-    def scale(self, loss):
-        return loss
-    def step(self, optimizer):
-        optimizer.step()
-    def update(self):
-        pass
-    def get_scale(self):
-        return 1.0
-    def set_scale(self, scale):
-        pass
+from torch.cuda.amp import GradScaler, autocast
 
 from data_loader import create_dataloaders
 
@@ -30,7 +13,7 @@ def compute_accuracy(logits, labels):
     return (logits.argmax(dim=1) == labels).float().mean().item()
 
 
-def train_epoch(model, loader, optimizer, criterion, device, scaler, model_name, is_geo):
+def train_epoch(model, loader, optimizer, criterion, device, scaler, model_name):
     model.train()
     total_loss, total_acc, n = 0.0, 0.0, 0
     for batch in loader:
@@ -39,7 +22,7 @@ def train_epoch(model, loader, optimizer, criterion, device, scaler, model_name,
         coords = coords.to(device)
 
         optimizer.zero_grad()
-        with noop_context():
+        with autocast():
             if model_name in GEO_MODELS:
                 if model_name == "17_MultiTask-Geo":
                     country_logits, coord_pred = model(images, coords)
@@ -59,7 +42,7 @@ def train_epoch(model, loader, optimizer, criterion, device, scaler, model_name,
         scaler.update()
 
         total_loss += loss.item() * images.size(0)
-        total_acc += compute_accuracy(logits, labels) * images.size(0)
+        total_acc += compute_accuracy(logits.detach(), labels) * images.size(0)
         n += images.size(0)
     return total_loss / n, total_acc / n
 
@@ -73,7 +56,7 @@ def evaluate(model, loader, criterion, device, model_name):
         images, labels = images.to(device), labels.to(device)
         coords = coords.to(device)
 
-        with noop_context():
+        with autocast():
             if model_name in GEO_MODELS:
                 if model_name == "17_MultiTask-Geo":
                     country_logits, _ = model(images, coords)
@@ -98,25 +81,24 @@ def train_and_eval(model_name, build_fn, data_root, device, epochs=50, batch_siz
     print(f"{'='*60}", flush=True)
 
     train_loader, valid_loader, test_loader, countries, _ = create_dataloaders(
-        data_root, image_size=image_size, batch_size=batch_size, num_workers=0
+        data_root, image_size=image_size, batch_size=batch_size, num_workers=4
     )
 
     model = build_fn().to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"Parameters: {n_params:,}")
+    print(f"Parameters: {n_params:,}", flush=True)
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
-    scaler = NoopScaler()  # Disable AMP — causes hangs with residual models
+    scaler = GradScaler()
 
     best_valid_acc = 0.0
     best_state = None
-    is_geo = model_name in GEO_MODELS
 
     t0 = time.time()
     for epoch in range(epochs):
-        train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device, scaler, model_name, is_geo)
+        train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device, scaler, model_name)
         valid_loss, valid_acc = evaluate(model, valid_loader, criterion, device, model_name)
         scheduler.step()
 
@@ -128,16 +110,15 @@ def train_and_eval(model_name, build_fn, data_root, device, epochs=50, batch_siz
             print(f"  Epoch {epoch+1:3d} | train_loss: {train_loss:.4f} train_acc: {train_acc:.4f} | valid_loss: {valid_loss:.4f} valid_acc: {valid_acc:.4f}", flush=True)
 
     train_time = time.time() - t0
-    print(f"Training time: {train_time:.1f}s ({train_time/60:.1f}m)")
+    print(f"Training time: {train_time:.1f}s ({train_time/60:.1f}m)", flush=True)
 
-    # Final eval on all splits
     model.load_state_dict(best_state)
     _, train_acc = evaluate(model, train_loader, criterion, device, model_name)
     _, valid_acc = evaluate(model, valid_loader, criterion, device, model_name)
     _, test_acc = evaluate(model, test_loader, criterion, device, model_name)
 
-    print(f"Final — Train: {train_acc:.4f} | Valid: {valid_acc:.4f} | Test: {test_acc:.4f}")
-    print(f"Best Valid: {best_valid_acc:.4f}")
+    print(f"Final — Train: {train_acc:.4f} | Valid: {valid_acc:.4f} | Test: {test_acc:.4f}", flush=True)
+    print(f"Best Valid: {best_valid_acc:.4f}", flush=True)
 
     return {
         "model": model_name,
