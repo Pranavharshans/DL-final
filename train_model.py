@@ -1,0 +1,135 @@
+"""Train one model, evaluate on train/valid/test, return metrics. Shared for all 20."""
+import time
+import torch
+import torch.nn as nn
+from torch.cuda.amp import GradScaler, autocast
+
+from data_loader import create_dataloaders
+
+GEO_MODELS = {"15_GeoDualBranch", "16_GeoFiLM", "17_MultiTask-Geo"}
+
+
+def compute_accuracy(logits, labels):
+    return (logits.argmax(dim=1) == labels).float().mean().item()
+
+
+def train_epoch(model, loader, optimizer, criterion, device, scaler, model_name, is_geo):
+    model.train()
+    total_loss, total_acc, n = 0.0, 0.0, 0
+    for batch in loader:
+        images, labels, coords = batch
+        images, labels = images.to(device), labels.to(device)
+        coords = coords.to(device)
+
+        optimizer.zero_grad()
+        with autocast():
+            if model_name in GEO_MODELS:
+                if model_name == "17_MultiTask-Geo":
+                    country_logits, coord_pred = model(images, coords)
+                    loss_country = criterion(country_logits, labels)
+                    loss_coord = nn.MSELoss()(coord_pred, coords)
+                    loss = loss_country + 0.1 * loss_coord
+                    logits = country_logits
+                else:
+                    logits = model(images, coords)
+                    loss = criterion(logits, labels)
+            else:
+                logits = model(images)
+                loss = criterion(logits, labels)
+
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
+
+        total_loss += loss.item() * images.size(0)
+        total_acc += compute_accuracy(logits, labels) * images.size(0)
+        n += images.size(0)
+    return total_loss / n, total_acc / n
+
+
+@torch.no_grad()
+def evaluate(model, loader, criterion, device, model_name):
+    model.eval()
+    total_loss, total_acc, n = 0.0, 0.0, 0
+    for batch in loader:
+        images, labels, coords = batch
+        images, labels = images.to(device), labels.to(device)
+        coords = coords.to(device)
+
+        with autocast():
+            if model_name in GEO_MODELS:
+                if model_name == "17_MultiTask-Geo":
+                    country_logits, _ = model(images, coords)
+                    loss = criterion(country_logits, labels)
+                    logits = country_logits
+                else:
+                    logits = model(images, coords)
+                    loss = criterion(logits, labels)
+            else:
+                logits = model(images)
+                loss = criterion(logits, labels)
+
+        total_loss += loss.item() * images.size(0)
+        total_acc += compute_accuracy(logits, labels) * images.size(0)
+        n += images.size(0)
+    return total_loss / n, total_acc / n
+
+
+def train_and_eval(model_name, build_fn, data_root, device, epochs=50, batch_size=32, lr=0.001):
+    print(f"\n{'='*60}")
+    print(f"Training: {model_name}")
+    print(f"{'='*60}")
+
+    train_loader, valid_loader, test_loader, countries, _ = create_dataloaders(
+        data_root, image_size=512, batch_size=batch_size, num_workers=4
+    )
+
+    model = build_fn().to(device)
+    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Parameters: {n_params:,}")
+
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+    scaler = GradScaler()
+
+    best_valid_acc = 0.0
+    best_state = None
+    is_geo = model_name in GEO_MODELS
+
+    t0 = time.time()
+    for epoch in range(epochs):
+        train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device, scaler, model_name, is_geo)
+        valid_loss, valid_acc = evaluate(model, valid_loader, criterion, device, model_name)
+        scheduler.step()
+
+        if valid_acc > best_valid_acc:
+            best_valid_acc = valid_acc
+            best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+
+        if (epoch + 1) % 10 == 0:
+            print(f"  Epoch {epoch+1:3d} | train_loss: {train_loss:.4f} train_acc: {train_acc:.4f} | valid_loss: {valid_loss:.4f} valid_acc: {valid_acc:.4f}")
+
+    train_time = time.time() - t0
+    print(f"Training time: {train_time:.1f}s ({train_time/60:.1f}m)")
+
+    # Final eval on all splits
+    model.load_state_dict(best_state)
+    _, train_acc = evaluate(model, train_loader, criterion, device, model_name)
+    _, valid_acc = evaluate(model, valid_loader, criterion, device, model_name)
+    _, test_acc = evaluate(model, test_loader, criterion, device, model_name)
+
+    print(f"Final — Train: {train_acc:.4f} | Valid: {valid_acc:.4f} | Test: {test_acc:.4f}")
+    print(f"Best Valid: {best_valid_acc:.4f}")
+
+    return {
+        "model": model_name,
+        "params": n_params,
+        "train_acc": round(train_acc, 4),
+        "valid_acc": round(valid_acc, 4),
+        "test_acc": round(test_acc, 4),
+        "best_valid_acc": round(best_valid_acc, 4),
+        "time_sec": round(train_time, 1),
+        "epochs": epochs,
+        "batch_size": batch_size,
+    }
