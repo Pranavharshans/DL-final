@@ -13,10 +13,11 @@ def compute_accuracy(logits, labels):
     return (logits.argmax(dim=1) == labels).float().mean().item()
 
 
-def train_epoch(model, loader, optimizer, criterion, device, scaler, model_name):
+def train_epoch(model, loader, optimizer, criterion, device, scaler, model_name, epoch_num):
     model.train()
     total_loss, total_acc, n = 0.0, 0.0, 0
-    for batch in loader:
+    total_batches = len(loader)
+    for step, batch in enumerate(loader):
         images, labels, coords = batch
         images, labels = images.to(device), labels.to(device)
         coords = coords.to(device)
@@ -44,6 +45,10 @@ def train_epoch(model, loader, optimizer, criterion, device, scaler, model_name)
         total_loss += loss.item() * images.size(0)
         total_acc += compute_accuracy(logits.detach(), labels) * images.size(0)
         n += images.size(0)
+
+        if (step + 1) % 20 == 0:
+            print(f"    Epoch {epoch_num:2d} | Step {step+1:3d}/{total_batches} | loss: {total_loss/n:.4f} acc: {total_acc/n:.4f}", flush=True)
+
     return total_loss / n, total_acc / n
 
 
@@ -98,7 +103,7 @@ def train_and_eval(model_name, build_fn, data_root, device, epochs=50, batch_siz
 
     t0 = time.time()
     for epoch in range(epochs):
-        train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device, scaler, model_name)
+        train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device, scaler, model_name, epoch + 1)
         valid_loss, valid_acc = evaluate(model, valid_loader, criterion, device, model_name)
         scheduler.step()
 
