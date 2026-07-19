@@ -305,13 +305,13 @@ class CNeXtBlock(nn.Module):
 class ConvNeXtMicro(nn.Module):
     def __init__(self):
         super().__init__()
-        dims = [64, 128, 256, 512]
+        dims = [48, 96, 192, 320]
         self.stem = nn.Sequential(nn.Conv2d(3, dims[0], 4, 4), nn.BatchNorm2d(dims[0]))
         self.s1 = nn.Sequential(*[CNeXtBlock(dims[0]) for _ in range(2)])
         self.d1 = nn.Sequential(nn.LayerNorm(dims[0]), nn.Linear(dims[0], dims[1]))
-        self.s2 = nn.Sequential(*[CNeXtBlock(dims[1]) for _ in range(3)])
+        self.s2 = nn.Sequential(*[CNeXtBlock(dims[1]) for _ in range(2)])
         self.d2 = nn.Sequential(nn.LayerNorm(dims[1]), nn.Linear(dims[1], dims[2]))
-        self.s3 = nn.Sequential(*[CNeXtBlock(dims[2]) for _ in range(4)])
+        self.s3 = nn.Sequential(*[CNeXtBlock(dims[2]) for _ in range(3)])
         self.d3 = nn.Sequential(nn.LayerNorm(dims[2]), nn.Linear(dims[2], dims[3]))
         self.s4 = nn.Sequential(*[CNeXtBlock(dims[3]) for _ in range(2)])
         self.pool = nn.AdaptiveAvgPool2d(1)
@@ -412,7 +412,7 @@ class WideResNet(nn.Module):
 
 @register("12_Wide-ResNet")
 def model_12():
-    return WideResNet()
+    return WideResNet(w=2)
 
 # ============================================================
 # MODEL 13: CNN+SelfAttention (~3.5M)
