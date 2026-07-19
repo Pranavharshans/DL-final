@@ -55,8 +55,8 @@ def create_dataloaders(data_root, image_size=256, batch_size=32, num_workers=2):
     valid_ds = PreCachedDataset(valid_rows, os.path.join(data_root, "valid"), country_to_idx, image_size)
     test_ds  = PreCachedDataset(test_rows,  os.path.join(data_root, "test"),  country_to_idx, image_size)
 
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=num_workers, pin_memory=True, persistent_workers=True)
-    valid_loader = DataLoader(valid_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True, persistent_workers=True)
-    test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True, persistent_workers=True)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True,  num_workers=num_workers, pin_memory=True)
+    valid_loader = DataLoader(valid_ds, batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+    test_loader  = DataLoader(test_ds,  batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
 
     return train_loader, valid_loader, test_loader, countries, country_to_idx

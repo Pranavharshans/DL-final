@@ -82,7 +82,7 @@ def train_and_eval(model_name, build_fn, data_root, device, epochs=50, batch_siz
     print(f"{'='*60}", flush=True)
 
     train_loader, valid_loader, test_loader, countries, _ = create_dataloaders(
-        data_root, image_size=image_size, batch_size=batch_size, num_workers=2
+        data_root, image_size=image_size, batch_size=batch_size, num_workers=0
     )
 
     model = build_fn().to(device)
