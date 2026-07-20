@@ -25,3 +25,4 @@ All models trained on RTX 2060 12GB, 256×256 images, 50 epochs, batch_size=32.
 | 19 | 19_RepVGG-Style | 2,409,618 | 1.0000 | 0.7708 | 0.7500 | 1175s |
 | 20 | 20_CompactNet | 277,619 | 1.0000 | 0.6208 | 0.6037 | 969s |
 
+| 31 | 31_CompactNet-XL | 4,663,954 | 1.0000 | 0.6750 | 0.6667 | 2023s |
