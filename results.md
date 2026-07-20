@@ -17,3 +17,4 @@ All models trained on RTX 2060 12GB, 256×256 images, 50 epochs, batch_size=32.
 | 12 | 12_Wide-ResNet | 2,762,546 | 0.9306 | 0.7537 | 0.7454 | 6244s |
 | 13 | 13_CNN+SelfAttention | 2,828,594 | 1.0000 | 0.7116 | 0.6843 | 946s |
 | 14 | 14_CNN+Transformer | 2,795,762 | 1.0000 | 0.7116 | 0.6870 | 1138s |
+| 15 | 15_GeoDualBranch | 2,859,250 | 0.0606 | 0.0616 | 0.0611 | 931s |
