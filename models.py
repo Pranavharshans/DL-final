@@ -722,38 +722,38 @@ class CompactNetXL(nn.Module):
         super().__init__()
         # Stem
         self.stem = nn.Sequential(
-            nn.Conv2d(3, 64, 3, 2, 1, bias=False),
-            nn.BatchNorm2d(64),
+            nn.Conv2d(3, 96, 3, 2, 1, bias=False),
+            nn.BatchNorm2d(96),
             nn.ReLU(inplace=True),
         )
         # Stage 1: 128px → blocks with residual
         self.s1 = nn.Sequential(
-            DWSEBlock(64, 64), DWSEBlock(64, 64),
+            DWSEBlock(96, 96), DWSEBlock(96, 96),
         )
         # Stage 2: 64px
         self.s2 = nn.Sequential(
-            DWSEBlock(64, 128, stride=2),
-            DWSEBlock(128, 128), DWSEBlock(128, 128),
+            DWSEBlock(96, 192, stride=2),
+            DWSEBlock(192, 192), DWSEBlock(192, 192),
         )
         # Stage 3: 32px
         self.s3 = nn.Sequential(
-            DWSEBlock(128, 256, stride=2),
-            DWSEBlock(256, 256), DWSEBlock(256, 256), DWSEBlock(256, 256),
+            DWSEBlock(192, 384, stride=2),
+            DWSEBlock(384, 384), DWSEBlock(384, 384), DWSEBlock(384, 384), DWSEBlock(384, 384),
         )
         # Stage 4: 16px
         self.s4 = nn.Sequential(
-            DWSEBlock(256, 512, stride=2),
-            DWSEBlock(512, 512), DWSEBlock(512, 512),
+            DWSEBlock(384, 768, stride=2),
+            DWSEBlock(768, 768), DWSEBlock(768, 768),
         )
         # Stage 5: 8px
         self.s5 = nn.Sequential(
-            DWSEBlock(512, 768, stride=2),
-            DWSEBlock(768, 768),
+            DWSEBlock(768, 896, stride=2),
+            DWSEBlock(896, 896),
         )
         self.pool = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Sequential(
             nn.Dropout(0.4),
-            nn.Linear(768, 256),
+            nn.Linear(896, 256),
             nn.ReLU(inplace=True),
             nn.Dropout(0.2),
             nn.Linear(256, num_classes),
