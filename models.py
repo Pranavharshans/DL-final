@@ -747,13 +747,13 @@ class CompactNetXL(nn.Module):
         )
         # Stage 5: 8px
         self.s5 = nn.Sequential(
-            DWSEBlock(768, 896, stride=2),
-            DWSEBlock(896, 896),
+            DWSEBlock(768, 768, stride=2),
+            DWSEBlock(768, 768),
         )
         self.pool = nn.AdaptiveAvgPool2d(1)
         self.fc = nn.Sequential(
             nn.Dropout(0.4),
-            nn.Linear(896, 256),
+            nn.Linear(768, 256),
             nn.ReLU(inplace=True),
             nn.Dropout(0.2),
             nn.Linear(256, num_classes),
