@@ -675,3 +675,97 @@ class CompactNet(nn.Module):
 @register("20_CompactNet")
 def model_20():
     return CompactNet()
+
+
+# ============================================================
+# MODEL 31: CompactNet-XL (~4.5M) — scaled depthwise model
+# ============================================================
+class SEBlock(nn.Module):
+    """Squeeze-and-Excitation for depthwise nets."""
+    def __init__(self, channels, reduction=8):
+        super().__init__()
+        self.se = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            conv1x1(channels, channels // reduction),
+            nn.ReLU(inplace=True),
+            conv1x1(channels // reduction, channels),
+            nn.Sigmoid(),
+        )
+    def forward(self, x):
+        return x * self.se(x)
+
+
+class DWSEBlock(nn.Module):
+    """Depthwise-Separable + SE + residual."""
+    def __init__(self, in_c, out_c, stride=1, use_se=True):
+        super().__init__()
+        self.use_res = stride == 1 and in_c == out_c
+        self.dw = nn.Conv2d(in_c, in_c, 3, stride, 1, groups=in_c, bias=False)
+        self.bn1 = nn.BatchNorm2d(in_c)
+        self.pw = conv1x1(in_c, out_c)
+        self.bn2 = nn.BatchNorm2d(out_c)
+        self.se = SEBlock(out_c) if use_se else nn.Identity()
+        self.act = nn.ReLU(inplace=True)
+    def forward(self, x):
+        identity = x
+        out = self.act(self.bn1(self.dw(x)))
+        out = self.bn2(self.pw(out))
+        out = self.se(out)
+        if self.use_res:
+            out = out + identity
+        return self.act(out)
+
+
+class CompactNetXL(nn.Module):
+    """Scaled CompactNet: ~4.5M params with SE + residual connections."""
+    def __init__(self, num_classes=NUM_CLASSES):
+        super().__init__()
+        # Stem
+        self.stem = nn.Sequential(
+            nn.Conv2d(3, 64, 3, 2, 1, bias=False),
+            nn.BatchNorm2d(64),
+            nn.ReLU(inplace=True),
+        )
+        # Stage 1: 128px → blocks with residual
+        self.s1 = nn.Sequential(
+            DWSEBlock(64, 64), DWSEBlock(64, 64),
+        )
+        # Stage 2: 64px
+        self.s2 = nn.Sequential(
+            DWSEBlock(64, 128, stride=2),
+            DWSEBlock(128, 128), DWSEBlock(128, 128),
+        )
+        # Stage 3: 32px
+        self.s3 = nn.Sequential(
+            DWSEBlock(128, 256, stride=2),
+            DWSEBlock(256, 256), DWSEBlock(256, 256), DWSEBlock(256, 256),
+        )
+        # Stage 4: 16px
+        self.s4 = nn.Sequential(
+            DWSEBlock(256, 512, stride=2),
+            DWSEBlock(512, 512), DWSEBlock(512, 512),
+        )
+        # Stage 5: 8px
+        self.s5 = nn.Sequential(
+            DWSEBlock(512, 768, stride=2),
+            DWSEBlock(768, 768),
+        )
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.fc = nn.Sequential(
+            nn.Dropout(0.4),
+            nn.Linear(768, 256),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.2),
+            nn.Linear(256, num_classes),
+        )
+
+    def forward(self, x):
+        x = self.stem(x)
+        x = self.s1(x); x = self.s2(x); x = self.s3(x)
+        x = self.s4(x); x = self.s5(x)
+        return self.fc(torch.flatten(self.pool(x), 1))
+
+
+@register("31_CompactNet-XL")
+def model_31():
+    return CompactNetXL()
