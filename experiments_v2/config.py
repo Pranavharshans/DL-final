@@ -10,7 +10,7 @@ from pathlib import Path
 class ExperimentConfig:
     data_root: Path = Path(__file__).resolve().parents[1]
     image_size: int = 256
-    train_cache_size: int = 288
+    train_cache_size: int = 256
     batch_size: int = 32
     epochs: int = 50
     learning_rate: float = 1e-3

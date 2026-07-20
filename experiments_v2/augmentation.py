@@ -23,7 +23,7 @@ class GeoAugmentV1:
         _, height, width = image.shape
         area = height * width
         for _ in range(10):
-            target_area = area * self._uniform(0.78, 1.0)
+            target_area = area * self._uniform(0.88, 1.0)
             aspect = self._uniform(0.90, 1.10)
             crop_width = round(math.sqrt(target_area * aspect))
             crop_height = round(math.sqrt(target_area / aspect))
