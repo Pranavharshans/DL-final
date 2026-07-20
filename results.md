@@ -21,3 +21,4 @@ All models trained on RTX 2060 12GB, 256×256 images, 50 epochs, batch_size=32.
 | 16 | 16_GeoFiLM | 2,250,418 | 0.0556 | 0.0556 | 0.0556 | 952s |
 | 17 | 17_MultiTask-Geo | 2,779,124 | 0.8415 | 0.4694 | 0.4343 | 936s |
 | 18 | 18_EfficientNet-Style | 2,480,514 | 1.0000 | 0.6495 | 0.6194 | 1193s |
+| 19 | 19_RepVGG-Style | 2,409,618 | 1.0000 | 0.7532 | 0.7574 | 1172s |
