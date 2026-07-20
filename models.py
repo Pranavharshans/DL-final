@@ -318,10 +318,12 @@ class ConvNeXtMicro(nn.Module):
         self.fc = nn.Linear(dims[3], NUM_CLASSES)
     def forward(self, x):
         x = self.stem(x)
-        b, c, h, w = x.shape
-        x = x.permute(0, 2, 3, 1); x = self.d1(self.s1(x)); x = x.permute(0, 3, 1, 2)
-        x = x.permute(0, 2, 3, 1); x = self.d2(self.s2(x)); x = x.permute(0, 3, 1, 2)
-        x = x.permute(0, 2, 3, 1); x = self.d3(self.s3(x)); x = x.permute(0, 3, 1, 2)
+        x = self.s1(x)
+        x = x.permute(0, 2, 3, 1); x = self.d1(x); x = x.permute(0, 3, 1, 2)
+        x = self.s2(x)
+        x = x.permute(0, 2, 3, 1); x = self.d2(x); x = x.permute(0, 3, 1, 2)
+        x = self.s3(x)
+        x = x.permute(0, 2, 3, 1); x = self.d3(x); x = x.permute(0, 3, 1, 2)
         x = self.s4(x)
         return self.fc(torch.flatten(self.pool(x), 1))
 
