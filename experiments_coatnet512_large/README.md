@@ -11,7 +11,8 @@ images and labels. Coordinates are never passed to the model.
 - No flips, rotation, perspective distortion, external data, or pretrained weights
 - Best checkpoint selected using ordinary validation accuracy
 - Final six-view inference: full image plus center and four corner crops
-- Test split evaluated exactly once, after all training and model selection
+- Single-crop and six-crop are compared on validation
+- Test is evaluated exactly once with the validation-selected inference method
 
 Multi-crop does not create or retrieve data. It takes six deterministic views
 from each supplied image, evaluates them sequentially, and averages their class

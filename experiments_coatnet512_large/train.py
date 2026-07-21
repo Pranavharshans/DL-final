@@ -72,13 +72,14 @@ def write_markdown(report: dict[str, object], path: Path) -> None:
     train = report["train"]
     valid = report["valid_single_crop"]
     valid_multi = report["valid_multicrop"]
-    test = report["test_multicrop"]
+    test = report["test_selected"]
     lines = [
         "# CoAtNet-Large-4M 512x512 Results",
         "",
         f"- Parameters: {int(report['parameters']):,}",
         f"- Best epoch: {int(report['best_epoch'])}",
         f"- Multi-crop views: {int(report['multicrop_views'])}",
+        f"- Selected test inference: {report['selected_inference']}",
         f"- Training time: {float(report['training_seconds']):.1f}s",
         "",
         "| Evaluation | Loss | Accuracy | Correct | Total |",
@@ -86,7 +87,7 @@ def write_markdown(report: dict[str, object], path: Path) -> None:
         f"| Train, single | {train['loss']:.4f} | {train['accuracy']:.4f} | {train['correct']} | {train['total']} |",
         f"| Valid, single | {valid['loss']:.4f} | {valid['accuracy']:.4f} | {valid['correct']} | {valid['total']} |",
         f"| Valid, 6-crop | {valid_multi['loss']:.4f} | {valid_multi['accuracy']:.4f} | {valid_multi['correct']} | {valid_multi['total']} |",
-        f"| Test, 6-crop | {test['loss']:.4f} | {test['accuracy']:.4f} | {test['correct']} | {test['total']} |",
+        f"| Test, selected | {test['loss']:.4f} | {test['accuracy']:.4f} | {test['correct']} | {test['total']} |",
         "",
         "## Per-country multi-crop accuracy",
         "",
@@ -243,10 +244,17 @@ def main() -> None:
     valid_multi = evaluate_multicrop(
         model, data.valid, device, data.countries, args.multicrop_size
     )
-    # Test is touched exactly once and only after checkpoint selection is complete.
-    test_multi = evaluate_multicrop(
-        model, data.test, device, data.countries, args.multicrop_size
+    selected_inference = (
+        "6-crop" if valid_multi.accuracy >= valid_single.accuracy else "single-crop"
     )
+    print(f"Selected test inference from validation: {selected_inference}")
+    # Test is touched exactly once using the validation-selected inference method.
+    if selected_inference == "6-crop":
+        test_selected = evaluate_multicrop(
+            model, data.test, device, data.countries, args.multicrop_size
+        )
+    else:
+        test_selected = evaluate(model, data.test, criterion, device, data.countries)
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_dir = config.output_dir / "checkpoints"
@@ -279,12 +287,13 @@ def main() -> None:
         "effective_batch_size": config.effective_batch_size,
         "multicrop_size": args.multicrop_size,
         "multicrop_views": 6,
+        "selected_inference": selected_inference,
         "countries": data.countries,
         "config": config.serializable(),
         "train": serializable_metrics(train_metrics),
         "valid_single_crop": serializable_metrics(valid_single),
         "valid_multicrop": serializable_metrics(valid_multi),
-        "test_multicrop": serializable_metrics(test_multi),
+        "test_selected": serializable_metrics(test_selected),
         "history": history,
         "checkpoint": str(checkpoint_path),
     }
@@ -303,14 +312,15 @@ def main() -> None:
     print(f"Train single: {train_metrics.accuracy:.4f}")
     print(f"Valid single: {valid_single.accuracy:.4f}")
     print(f"Valid 6-crop: {valid_multi.accuracy:.4f}")
-    print(f"Test 6-crop: {test_multi.accuracy:.4f}")
-    print("\nPer-country validation/test 6-crop accuracy:")
+    print(f"Selected test inference: {selected_inference}")
+    print(f"Test selected: {test_selected.accuracy:.4f}")
+    print("\nPer-country multi-crop validation/selected test accuracy:")
     for country in data.countries:
         print(
             f"  {country:20s} valid={valid_multi.per_country_accuracy[country]:.4f} "
-            f"test={test_multi.per_country_accuracy[country]:.4f}"
+            f"test={test_selected.per_country_accuracy[country]:.4f}"
         )
-    print_confusion_matrix(test_multi.confusion_matrix, data.countries)
+    print_confusion_matrix(test_selected.confusion_matrix, data.countries)
     print(f"\nCheckpoint: {checkpoint_path}")
     print(f"JSON results: {results_json}")
     print(f"Markdown results: {results_markdown}")
