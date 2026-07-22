@@ -1,6 +1,7 @@
 import torch
 
 from experiments_local_global_mil.model import LocalGlobalMIL
+from experiments_local_global_mil.train import update_ema
 from experiments_local_global_mil.views import FiveViewDataset
 from experiments_v2.models.common import count_parameters
 
@@ -25,3 +26,13 @@ def test_five_views_are_constructed():
     views, label, _ = FiveViewDataset(TinyDataset(), training=False)[0]
     assert views.shape == (5, 3, 256, 256)
     assert label.item() == 2
+
+
+def test_ema_warms_up_instead_of_retaining_initialization():
+    model = torch.nn.Linear(2, 1, bias=False)
+    ema = torch.nn.Linear(2, 1, bias=False)
+    model.weight.data.fill_(1.0)
+    ema.weight.data.zero_()
+    decay = update_ema(ema, model, target_decay=0.999, updates=1)
+    assert decay < 0.2
+    assert ema.weight.mean().item() > 0.8

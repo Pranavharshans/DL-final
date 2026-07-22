@@ -50,6 +50,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup-epochs", type=int, default=5)
     parser.add_argument("--view-size", type=int, default=256)
     parser.add_argument("--ema-decay", type=float, default=0.999)
+    parser.add_argument(
+        "--resume",
+        type=Path,
+        default=None,
+        help="Resume from a last_state.pt checkpoint created by this script",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--allow-cpu", action="store_true")
@@ -69,7 +75,12 @@ def make_loader(dataset, batch_size: int, workers: int, shuffle: bool, seed: int
 
 
 @torch.no_grad()
-def update_ema(ema: nn.Module, model: nn.Module, decay: float) -> None:
+def update_ema(
+    ema: nn.Module, model: nn.Module, target_decay: float, updates: int
+) -> float:
+    # A fixed 0.999 decay leaves too much random initialization in the EMA for
+    # thousands of updates. Ramp toward the target so EMA is useful immediately.
+    decay = min(target_decay, (1.0 + updates) / (10.0 + updates))
     model_values = model.state_dict()
     for name, value in ema.state_dict().items():
         source = model_values[name].detach()
@@ -77,6 +88,7 @@ def update_ema(ema: nn.Module, model: nn.Module, decay: float) -> None:
             value.mul_(decay).add_(source, alpha=1.0 - decay)
         else:
             value.copy_(source)
+    return decay
 
 
 def train_epoch(
@@ -90,6 +102,7 @@ def train_epoch(
     epoch,
     ema,
     ema_decay,
+    ema_updates,
 ):
     model.train()
     optimizer.zero_grad(set_to_none=True)
@@ -119,7 +132,8 @@ def train_epoch(
             else:
                 optimizer.step()
             optimizer.zero_grad(set_to_none=True)
-            update_ema(ema, model, ema_decay)
+            ema_updates += 1
+            effective_decay = update_ema(ema, model, ema_decay, ema_updates)
         count = labels.shape[0]
         total_loss += raw_loss.detach().item() * count
         total_correct += logits.detach().argmax(1).eq(labels).sum().item()
@@ -129,7 +143,7 @@ def train_epoch(
                 f"  epoch={epoch:03d} batch={batch_index + 1:04d}/{len(loader):04d} loss={total_loss / total:.4f} accuracy={total_correct / total:.4f}",
                 flush=True,
             )
-    return total_loss / total, total_correct / total
+    return total_loss / total, total_correct / total, ema_updates, effective_decay
 
 
 @torch.inference_mode()
@@ -259,13 +273,33 @@ def main() -> None:
         lambda epoch: cosine_with_warmup(epoch, config.warmup_epochs, config.epochs),
     )
     scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
-    best_accuracy, best_epoch, best_state = -1.0, 0, None
+    best_accuracy, best_epoch, best_state, best_source = -1.0, 0, None, "raw"
     history = []
+    ema_updates = 0
+    start_epoch = 1
+    checkpoint_dir = config.output_dir / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    last_checkpoint_path = checkpoint_dir / "last_state.pt"
+    if args.resume is not None:
+        resume = torch.load(args.resume, map_location=device, weights_only=False)
+        model.load_state_dict(resume["model_state"])
+        ema.load_state_dict(resume["ema_state"])
+        optimizer.load_state_dict(resume["optimizer_state"])
+        scheduler.load_state_dict(resume["scheduler_state"])
+        scaler.load_state_dict(resume["scaler_state"])
+        start_epoch = int(resume["epoch"]) + 1
+        ema_updates = int(resume["ema_updates"])
+        best_accuracy = float(resume["best_accuracy"])
+        best_epoch = int(resume["best_epoch"])
+        best_state = resume["best_state"]
+        best_source = str(resume["best_source"])
+        history = list(resume["history"])
+        print(f"Resuming after epoch {start_epoch - 1} from {args.resume}")
     if device.type == "cuda":
         torch.cuda.reset_peak_memory_stats(device)
     started = time.monotonic()
-    for epoch in range(1, config.epochs + 1):
-        train_loss, train_accuracy = train_epoch(
+    for epoch in range(start_epoch, config.epochs + 1):
+        train_loss, train_accuracy, ema_updates, effective_decay = train_epoch(
             model,
             train_loader,
             criterion,
@@ -276,33 +310,68 @@ def main() -> None:
             epoch,
             ema,
             args.ema_decay,
+            ema_updates,
         )
-        valid = evaluate(ema, valid_loader, criterion, device, data.countries)
+        valid_raw = evaluate(model, valid_loader, criterion, device, data.countries)
+        valid_ema = evaluate(ema, valid_loader, criterion, device, data.countries)
         history.append(
             {
                 "epoch": epoch,
                 "train_loss": train_loss,
                 "train_accuracy": train_accuracy,
-                "valid_ema_loss": valid.loss,
-                "valid_ema_accuracy": valid.accuracy,
+                "valid_raw_loss": valid_raw.loss,
+                "valid_raw_accuracy": valid_raw.accuracy,
+                "valid_ema_loss": valid_ema.loss,
+                "valid_ema_accuracy": valid_ema.accuracy,
+                "ema_effective_decay": effective_decay,
                 "learning_rate": optimizer.param_groups[0]["lr"],
             }
         )
-        if valid.accuracy > best_accuracy:
-            best_accuracy, best_epoch = valid.accuracy, epoch
+        candidate = ema if valid_ema.accuracy >= valid_raw.accuracy else model
+        candidate_metrics = (
+            valid_ema if valid_ema.accuracy >= valid_raw.accuracy else valid_raw
+        )
+        candidate_source = "ema" if valid_ema.accuracy >= valid_raw.accuracy else "raw"
+        if candidate_metrics.accuracy > best_accuracy:
+            best_accuracy, best_epoch, best_source = (
+                candidate_metrics.accuracy,
+                epoch,
+                candidate_source,
+            )
             best_state = {
                 name: value.detach().cpu().clone()
-                for name, value in ema.state_dict().items()
+                for name, value in candidate.state_dict().items()
             }
         scheduler.step()
+        torch.save(
+            {
+                "epoch": epoch,
+                "model_state": model.state_dict(),
+                "ema_state": ema.state_dict(),
+                "optimizer_state": optimizer.state_dict(),
+                "scheduler_state": scheduler.state_dict(),
+                "scaler_state": scaler.state_dict(),
+                "ema_updates": ema_updates,
+                "best_accuracy": best_accuracy,
+                "best_epoch": best_epoch,
+                "best_state": best_state,
+                "best_source": best_source,
+                "history": history,
+            },
+            last_checkpoint_path,
+        )
         print(
-            f"EPOCH {epoch:03d}/{config.epochs} train_loss={train_loss:.4f} train_acc={train_accuracy:.4f} valid_ema_loss={valid.loss:.4f} valid_ema_acc={valid.accuracy:.4f} best={best_accuracy:.4f}@{best_epoch:03d}",
+            f"EPOCH {epoch:03d}/{config.epochs} train_loss={train_loss:.4f} "
+            f"train_acc={train_accuracy:.4f} raw_val={valid_raw.accuracy:.4f} "
+            f"ema_val={valid_ema.accuracy:.4f} ema_decay={effective_decay:.6f} "
+            f"best={best_accuracy:.4f}@{best_epoch:03d}({best_source})",
             flush=True,
         )
 
     if best_state is None:
         raise RuntimeError("Training completed without a checkpoint")
-    ema.load_state_dict(best_state)
+    selected_model = copy.deepcopy(model).eval()
+    selected_model.load_state_dict(best_state)
     training_seconds = time.monotonic() - started
     # Disable augmentation before reporting deterministic train accuracy.
     data.train.dataset.augment = None
@@ -313,10 +382,16 @@ def main() -> None:
         False,
         config.seed,
     )
-    train_metrics = evaluate(ema, train_eval_loader, criterion, device, data.countries)
-    valid_metrics = evaluate(ema, valid_loader, criterion, device, data.countries)
+    train_metrics = evaluate(
+        selected_model, train_eval_loader, criterion, device, data.countries
+    )
+    valid_metrics = evaluate(
+        selected_model, valid_loader, criterion, device, data.countries
+    )
     # Test is evaluated exactly once after model selection on validation.
-    test_metrics = evaluate(ema, test_loader, criterion, device, data.countries)
+    test_metrics = evaluate(
+        selected_model, test_loader, criterion, device, data.countries
+    )
     peak_allocated = (
         torch.cuda.max_memory_allocated(device) / 1024**3
         if device.type == "cuda"
@@ -329,8 +404,6 @@ def main() -> None:
     )
 
     config.output_dir.mkdir(parents=True, exist_ok=True)
-    checkpoint_dir = config.output_dir / "checkpoints"
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
     checkpoint_path = checkpoint_dir / "local_global_mil_best.pt"
     torch.save(
         {
@@ -346,6 +419,7 @@ def main() -> None:
             "parameters": parameters,
             "best_epoch": best_epoch,
             "best_valid_accuracy": best_accuracy,
+            "best_source": best_source,
         },
         checkpoint_path,
     )
@@ -358,6 +432,7 @@ def main() -> None:
         "view_tensors_processed": len(data.train.dataset) * config.epochs * 5,
         "best_epoch": best_epoch,
         "best_valid_accuracy": best_accuracy,
+        "best_source": best_source,
         "training_seconds": training_seconds,
         "peak_cuda_allocated_gb": peak_allocated,
         "peak_cuda_reserved_gb": peak_reserved,
@@ -373,7 +448,7 @@ def main() -> None:
     results_json.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     results_md = config.output_dir / "results.md"
     results_md.write_text(
-        f"# Local-Global MIL Results\n\n- Parameters: {parameters:,}\n- Best epoch: {best_epoch}/{config.epochs}\n- Train accuracy: {train_metrics.accuracy:.4f}\n- Valid accuracy: {valid_metrics.accuracy:.4f}\n- Test accuracy: {test_metrics.accuracy:.4f}\n",
+        f"# Local-Global MIL Results\n\n- Parameters: {parameters:,}\n- Best epoch: {best_epoch}/{config.epochs} ({best_source})\n- Train accuracy: {train_metrics.accuracy:.4f}\n- Valid accuracy: {valid_metrics.accuracy:.4f}\n- Test accuracy: {test_metrics.accuracy:.4f}\n",
         encoding="utf-8",
     )
 
@@ -381,7 +456,7 @@ def main() -> None:
     print("FINAL RESULTS — Local-Global MIL")
     print("=" * 76)
     print(f"Parameters: {parameters:,} / {MAX_PARAMETERS:,}")
-    print(f"Best epoch: {best_epoch}/{config.epochs}")
+    print(f"Best epoch: {best_epoch}/{config.epochs} ({best_source})")
     print(f"Training time: {training_seconds / 3600:.2f}h")
     print(f"Peak CUDA allocated/reserved: {peak_allocated:.2f}/{peak_reserved:.2f} GB")
     print(f"Train: {train_metrics.accuracy:.4f}")

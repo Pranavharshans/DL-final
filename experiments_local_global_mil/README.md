@@ -30,3 +30,6 @@ python -u -m experiments_local_global_mil.train \
 Five views increase activation memory and compute, but the shared backbone is
 counted only once. Run the default batch 8 first on a 24GB L4.
 
+Every epoch reports both raw-model and warm-started EMA validation accuracy.
+The better validation checkpoint is retained. `checkpoints/last_state.pt` is
+written every epoch and can be resumed with `--resume PATH`.
